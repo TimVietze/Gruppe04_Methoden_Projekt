@@ -35,9 +35,11 @@ OUT = PROJECT_ROOT / "Methoden Data" / "Weather Data" / "Storm" / "StormEvents_A
 YEAR_PATTERN = re.compile(r"StormEvents_(\d{4})\.csv$")
 
 READ_COLS = [
+    "STATE",
     "STATE_FIPS",
     "CZ_TYPE",
     "CZ_FIPS",
+    "CZ_NAME",
     "BEGIN_YEARMONTH",
     "BEGIN_DAY",
     "END_YEARMONTH",
@@ -45,6 +47,7 @@ READ_COLS = [
     "EVENT_TYPE",
     "INJURIES_DIRECT",
     "DEATHS_DIRECT",
+    "DEATHS_INDIRECT",
     "DAMAGE_PROPERTY",
     "DAMAGE_CROPS",
     "MAGNITUDE",
@@ -57,14 +60,17 @@ READ_COLS = [
 ]
 
 OUT_COLS = [
+    "STATE",
     "STATE_FIPS",
     "CZ_TYPE",
     "CZ_FIPS",
+    "CZ_NAME",
     "BEGIN_DATE",
     "END_DATE",
     "EVENT_TYPE",
     "INJURIES_DIRECT",
     "DEATHS_DIRECT",
+    "DEATHS_INDIRECT",
     "DAMAGE_PROPERTY",
     "DAMAGE_CROPS",
     "MAGNITUDE",
@@ -141,6 +147,7 @@ def load_year_file(path: Path) -> tuple[pd.DataFrame, int, int, int]:
         DAMAGE_CROPS=parse_damage(df["DAMAGE_CROPS"]),
         INJURIES_DIRECT=pd.to_numeric(df["INJURIES_DIRECT"], errors="coerce").fillna(0).astype("int32"),
         DEATHS_DIRECT=pd.to_numeric(df["DEATHS_DIRECT"], errors="coerce").fillna(0).astype("int32"),
+        DEATHS_INDIRECT=pd.to_numeric(df["DEATHS_INDIRECT"], errors="coerce").fillna(0).astype("int32"),
     )
 
     zero_impact = (
@@ -148,6 +155,7 @@ def load_year_file(path: Path) -> tuple[pd.DataFrame, int, int, int]:
         & df["DAMAGE_CROPS"].fillna(0).eq(0)
         & df["INJURIES_DIRECT"].eq(0)
         & df["DEATHS_DIRECT"].eq(0)
+        & df["DEATHS_INDIRECT"].eq(0)
     )
     drop_mask = zero_impact & df["EVENT_TYPE"].isin(LOW_SIGNAL_TYPES)
     n_lowsig = int(drop_mask.sum())
