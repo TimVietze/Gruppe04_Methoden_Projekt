@@ -1,6 +1,1 @@
 CLAUDE.md
-
-# Aggregated storm events file is regenerable from year files via
-# Data Cleaning Scripts/StormEvents_Aggregation.py and exceeds GitHub's
-# 100 MiB per-file limit.
-Methoden Data/Weather Data/Storm/StormEvents_ALL.csv
