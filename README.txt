@@ -36,6 +36,12 @@ Zillow ZHVI (housing target):
     -> per-tier CSVs in
        Methoden Data/X_Original Data/Housing Data Original/
 
+Census CBSA Delineation File / County Population:
+    https://www.census.gov/newsroom/press-kits/2017/20170323_popestimates.html
+    -> Population
+
+    https://www.census.gov/geographies/reference-files/time-series/demo/metro-micro/delineation-files.html
+    -> Delineation File
 
 ================================================================================
 Folder layout
@@ -44,27 +50,37 @@ Folder layout
 Methoden Data/
     X_Original Data/                 immutable raw downloads, never edited
         Housing Data Original/       Zillow ZHVI per tier / bedroom count
+            Zillow_Filename_Tokens.csv  (dictionary of filename tokens)
         Weather Data Original/
             Storm Original/          27 yearly NOAA Storm Events CSVs
             Fema_DisasterDeclarationsSummaries.csv
             Fema_Disaster_Declarations_Fields.csv  (field dictionary)
             Temp_per_county_month.csv
+        Other Data Original/
+            Census CBSA Delineation File.csv
+            Census county population.csv
+            Zillow_RegionID_to_CBSA_overrides.csv  (manual map for unmatchable Zillow regions)
     Weather Data/                    cleaned outputs of the pipeline
         Storm/StormEvents_ALL.csv
         Fema/Fema_DisasterDeclarations_Cleaned.csv
-        Weather_Features.csv         <- the modeling-ready table
+        Weather_Features.csv         <- the county-level feature table
+        Weather_Features_Metro.csv   <- the metro-level feature table (output of stage 4)
+    Modeling Data/                   final modeling-ready outputs
+        Modeling_Table.csv           <- weather + 9 ZHVI variants joined on (CBSA, month)
 
 Data Cleaning Scripts/
-    StormEvents_Aggregation.py
-    Fema_DisasterDeclarations_Cleaning.py
-    WeatherFeatures_Aggregation.py
+    1_StormEvents_Aggregation.py
+    2_Fema_DisasterDeclarations_Cleaning.py
+    3_WeatherFeatures_Aggregation.py
+    4_WeatherFeatures_Metro_Aggregation.py
+    5_ModelingTable_Aggregation.py
 
 
 ================================================================================
 Pipeline (run in this order)
 ================================================================================
 
-1) StormEvents_Aggregation.py
+1) 1_StormEvents_Aggregation.py
    IN:  27 yearly Storm Original/StormEvents_YYYY.csv files
    OUT: Methoden Data/Weather Data/Storm/StormEvents_ALL.csv  (~78 MB)
 
@@ -88,7 +104,7 @@ Pipeline (run in this order)
 
    ~1.6M raw rows -> ~910k rows, 51 cols -> 20 cols.
 
-2) Fema_DisasterDeclarations_Cleaning.py
+2) 2_Fema_DisasterDeclarations_Cleaning.py
    IN:  Fema_DisasterDeclarationsSummaries.csv  (~70k rows, 28 cols)
    OUT: Methoden Data/Weather Data/Fema/Fema_DisasterDeclarations_Cleaned.csv
         (~3.6 MB, ~50k rows, 14 cols)
@@ -103,7 +119,7 @@ Pipeline (run in this order)
      downstream code can decide whether to drop or explode them.
    - Filters to incidents on/after 2000-01-01 to align with Zillow coverage.
 
-3) WeatherFeatures_Aggregation.py
+3) 3_WeatherFeatures_Aggregation.py
    IN:  StormEvents_ALL.csv,
         Fema_DisasterDeclarations_Cleaned.csv,
         Fema_DisasterDeclarationsSummaries.csv (raw, for designatedArea
@@ -161,6 +177,66 @@ Pipeline (run in this order)
      - tavg_f dropped (derivable).
      - tmax_f / tmin_f rounded to integer.
 
+4) 4_WeatherFeatures_Metro_Aggregation.py
+   IN:  Weather_Features.csv,
+        Census CBSA Delineation File.csv,
+        Census county population.csv
+   OUT: Methoden Data/Weather Data/Weather_Features_Metro.csv
+        (~28 MB, ~290k rows, 34 cols, ~930 CBSAs)
+
+   Aggregates the county-level Weather_Features to metro level (CBSA), so the
+   table can join Zillow's metro-level ZHVI files. Each column gets its own
+   aggregation rule based on what the variable means:
+
+     - Sum: n_storm_events, damage_property_sum, damage_crops_sum,
+       deaths_total, injuries_total, n_fema_declarations  (additive across
+       counties of a metro).
+     - Max (OR): every had_* and *_active 0/1 flag (16 cols)  (if any county
+       in the metro experienced the hazard, the metro experienced it).
+     - Population-weighted mean: tmax_f, tmin_f, precip_in, fema_active_days
+       (intensity variables; weighted by Census POPESTIMATE2016 so a 5M
+       county counts more than a 5,000 desert county).
+
+   Counties without a CBSA mapping (rural, ~1,500) are dropped -- Zillow has
+   no price for them. The uploaded Census county population file only covers
+   counties inside Combined Statistical Areas (~60% of CBSA counties), so
+   counties without population fall back to weight=1; they then contribute
+   negligibly to weighted means while their sum/max contributions stay intact.
+
+5) 5_ModelingTable_Aggregation.py
+   IN:  Weather_Features_Metro.csv,
+        9 Zillow ZHVI CSVs in Housing Data Original/,
+        Census CBSA Delineation File.csv,
+        Zillow_RegionID_to_CBSA_overrides.csv
+   OUT: Methoden Data/Modeling Data/Modeling_Table.csv
+        (~53 MB, ~225k rows, 43 cols, ~855 CBSAs)
+
+   Joins all 9 Zillow ZHVI variants onto the metro weather table, producing
+   the final modeling-ready file.
+
+   Zillow regions are mapped to Census CBSA codes by:
+     1. Shortening each Census CBSA Title from "Atlanta-Sandy
+        Springs-Roswell, GA" to "Atlanta, GA" (city prefix + state),
+     2. Unicode-normalizing both sides,
+     3. Looking up Zillow's RegionName in the resulting dictionary,
+     4. Falling back to a 6-line manual override file for cases the
+        shortener cannot reach (Louisville, The Villages, Ogdensburg,
+        London KY, California MD, Glenwood Springs).
+
+   Match rate: 96.6% (864 of 894 Zillow MSA rows). The remaining ~30
+   unmatched rows are SizeRank > 500 micropolitan areas Zillow lists but
+   Census assigns to different parent CBSAs already covered by separate
+   Zillow rows -- mapping them would create duplicate keys, so they are
+   intentionally dropped.
+
+   Each Zillow file is melted from wide format (one column per month) to
+   long, attached to its CBSA_CODE, and combined into a single wide frame
+   keyed (CBSA_CODE, YEAR_MONTH) with one column per ZHVI variant. The
+   weather table is then inner-joined onto it. Pre-2000 Zillow rows are
+   dropped (no weather features to pair with). ZHVI cells with no value
+   stay NaN -- not all metros have data for all variants (small metros
+   often miss the 5+ bedroom slice).
+
 
 ================================================================================
 Output: Weather_Features.csv schema
@@ -194,6 +270,46 @@ Temperature (3):
 
 
 ================================================================================
+Output: Weather_Features_Metro.csv schema  (Stage 4)
+================================================================================
+
+Keys (3):                 CBSA_CODE, CBSA_TITLE, YEAR_MONTH (YYYY-MM)
+
+The 31 feature columns are inherited from Weather_Features.csv but aggregated
+to CBSA-month grain (sum / OR / pop-weighted mean -- see stage 4 in the
+Pipeline section above).
+
+STATE, COUNTY, STATE_FIPS, COUNTY_FIPS are dropped -- replaced by CBSA_CODE
+(5-digit Census code) and CBSA_TITLE (full Census title, e.g.
+"Atlanta-Sandy Springs-Roswell, GA").
+
+
+================================================================================
+Output: Modeling_Table.csv schema  (Stage 5)
+================================================================================
+
+Keys (3):                 CBSA_CODE, CBSA_TITLE, YEAR_MONTH
+
+Weather (31):             all 31 feature columns from Weather_Features_Metro
+
+Housing (9):              one column per Zillow ZHVI variant
+    zhvi_all_bottom         all-homes bottom-tier  (~5th-35th percentile)
+    zhvi_all_top            all-homes top-tier     (~65th-95th percentile)
+    zhvi_sfr_mid            single-family mid-tier
+    zhvi_condo_mid          condos mid-tier
+    zhvi_1br_mid ..         mid-tier homes broken out by bedroom count
+    zhvi_5br_mid              (1, 2, 3, 4, 5+ bedrooms)
+
+ZHVI cells stay NaN where Zillow has no value for that (metro, month) -- not
+all metros have data for all variants. The modeling code is responsible for
+handling missingness per target.
+
+See Methoden Data/X_Original Data/Housing Data Original/Zillow_Filename_Tokens.csv
+for full documentation of the Zillow filename tokens (uc, sfrcondo, sfr,
+condo, tier, sm_sa, etc).
+
+
+================================================================================
 Known caveats
 ================================================================================
 
@@ -223,14 +339,39 @@ Known caveats
 5. NOAA data starts 2000-01; that is the cutoff used everywhere in this
    pipeline. Earlier FEMA history is dropped during cleaning.
 
+6. The uploaded Census county population file is a CSA-restricted subset of
+   the Census Population Estimates Program. It only contains counties that
+   are part of Combined Statistical Areas, leaving ~40% of CBSA counties
+   without a population weight. Stage 4 falls back to weight=1 for those,
+   which means they contribute negligibly to pop-weighted temperature /
+   precipitation but their sums (damage, deaths, event counts) and OR
+   flags are unaffected. Replacing the file with a full county Population
+   Estimates file would tighten the temperature weighting; not a blocker.
+
+7. Zillow region names are not directly Census CBSA codes. Stage 5 uses a
+   name-shorten transform plus a small (6-entry) manual override file to
+   map Zillow RegionID -> CBSA_CODE. Achieves 96.6% match. Roughly 30
+   tiny micropolitan areas (SizeRank > 500) Zillow lists are intentionally
+   dropped because their Census parent CBSA already has a separate Zillow
+   row -- mapping them would corrupt the modeling table.
+
+8. The all-homes mid-tier ZHVI is missing from the project. Zillow only
+   distributes that variant in non-seasonally-adjusted form, which mixes
+   poorly with the SA variants used everywhere else. The mid-tier is still
+   available indirectly via the property-type slices (sfr_mid, condo_mid)
+   and the bedroom-count slices (1br_mid through 5br_mid).
+
 
 ================================================================================
 Reproduce
 ================================================================================
 
 cd "FS26_Methoden_Project"
-python3 "Data Cleaning Scripts/StormEvents_Aggregation.py"
-python3 "Data Cleaning Scripts/Fema_DisasterDeclarations_Cleaning.py"
-python3 "Data Cleaning Scripts/WeatherFeatures_Aggregation.py"
+python3 "Data Cleaning Scripts/1_StormEvents_Aggregation.py"
+python3 "Data Cleaning Scripts/2_Fema_DisasterDeclarations_Cleaning.py"
+python3 "Data Cleaning Scripts/3_WeatherFeatures_Aggregation.py"
+python3 "Data Cleaning Scripts/4_WeatherFeatures_Metro_Aggregation.py"
+python3 "Data Cleaning Scripts/5_ModelingTable_Aggregation.py"
 
-Outputs land in `Methoden Data/Weather Data/`.
+Outputs land in `Methoden Data/Weather Data/` (stages 1-4) and
+`Methoden Data/Modeling Data/` (stage 5).

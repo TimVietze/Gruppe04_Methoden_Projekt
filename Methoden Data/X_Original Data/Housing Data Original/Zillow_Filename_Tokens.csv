@@ -1,0 +1,23 @@
+token,category,meaning,notes
+zhvi,index_type,Zillow Home Value Index,"Smoothed weighted average of the middle third (35th-65th percentile) of home Zestimates in a region. Measures the typical home value -- not a strict median, not a strict mean. Updated monthly. Uses neural Zestimate methodology since 2023."
+uc,prefix,Internal Zillow cut-type prefix,"Part of Zillow's stable cut-type key (e.g. ""uc_sfrcondo""). Not separately defined in the public methodology -- treat as opaque."
+sfrcondo,property_type,All homes -- single-family residences plus condos and co-ops combined,Most general property scope.
+sfr,property_type,Single-family residences only,Excludes condos and co-ops.
+condo,property_type,Condos only,
+bdrmcnt_1,bedroom_count,1-bedroom homes,
+bdrmcnt_2,bedroom_count,2-bedroom homes,
+bdrmcnt_3,bedroom_count,3-bedroom homes,
+bdrmcnt_4,bedroom_count,4-bedroom homes,
+bdrmcnt_5,bedroom_count,5+ bedroom homes,Bucket includes homes with 5 or more bedrooms.
+tier_0.0_0.33,tier,Bottom tier (lower-priced homes),"Filename label is approximate. Zillow's published methodology defines the bottom tier as the 5th-35th percentile of home values in the metro -- not literally 0-33. Tails are trimmed."
+tier_0.33_0.67,tier,Middle tier (mid-priced homes; the ""typical"" market),"Filename label is approximate. Zillow's methodology defines the middle tier as the 35th-65th percentile of home values in the metro. Most-cited variant for general analysis."
+tier_0.67_1.0,tier,Top tier (higher-priced homes),"Filename label is approximate. Zillow's methodology defines the top tier as the 65th-95th percentile of home values in the metro. Tails are trimmed."
+sm_sa,transformation,Smoothed and seasonally adjusted,"Smoothing reduces month-to-month noise; seasonal adjustment removes systematic monthly seasonality so trends are easier to read. Almost every modeling-relevant ZHVI file is sm_sa."
+time_series,transformation,Raw monthly series -- NOT smoothed and NOT seasonally adjusted,"Mixes poorly with sm_sa series in the same model (different noise characteristics). Removed from this project for that reason."
+month,frequency,Monthly observations,One value per region per calendar month.
+Metro,region_type,Metropolitan Statistical Area (MSA / CBSA),"Group of counties that economically function as one urban region. ~390 metros in the US. Coarser than counties; many counties combine into one metro row."
+RegionID,column,Zillow's stable numeric ID for the region,"Use this -- not RegionName -- as the join key against other Zillow files."
+SizeRank,column,National rank of the region by population/size,1 = largest. Useful for filtering to top-N metros if needed.
+RegionName,column,Human-readable metro name,"E.g. ""Atlanta-Sandy Springs-Alpharetta, GA""."
+RegionType,column,Geography level the row represents,"For these files always ""msa"" (or ""country"" for the US-total row at the top)."
+StateName,column,Two-letter state abbreviation of the metro's primary state,"Empty for the country-level row. A metro can span multiple states (e.g. NYC); only the primary state is shown."

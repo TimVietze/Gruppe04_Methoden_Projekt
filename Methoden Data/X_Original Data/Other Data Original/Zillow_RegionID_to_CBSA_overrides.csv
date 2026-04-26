@@ -1,0 +1,7 @@
+RegionID,RegionName,CBSA_CODE,note
+394807,"Louisville, KY",31140,"Census uses 'Louisville/Jefferson County, KY-IN' which the name-shortener cannot reach."
+395153,"The Villages, FL",48680,"Census CBSA is 'Wildwood-The Villages, FL'. Wildwood comes alphabetically first so the shortener picks Wildwood, missing the match."
+394932,"Ogdensburg, NY",32390,"Census CBSA is 'Massena-Ogdensburg, NY'. Massena is the listed primary city."
+394802,"London, KY",18340,"London KY is in Laurel County which Census assigns to the 'Corbin, KY' micropolitan area. Zillow has no Corbin row so this is safe."
+753872,"California, MD",30500,"California MD is in St. Mary's County which Census assigns to 'Lexington Park, MD'. Zillow has no Lexington Park row so this is safe."
+753881,"Glenwood Springs, CO",40090,"Glenwood Springs is in Garfield County which Census assigns to 'Rifle, CO'. Zillow has no Rifle row so this is safe."
