@@ -17,7 +17,7 @@ Inputs:
   - Methoden Data/X_Original Data/Other Data Original/Zillow_RegionID_to_CBSA_overrides.csv
   - Methoden Data/X_Original Data/Economic Data Original/bls_laus_cbsa_monthly_raw.csv
 Output:
-  - Methoden Data/Modeling Data/Modeling_Table.csv  (~270k rows, 44 cols)
+  - Methoden Data/Modeling_Table.csv  (~270k rows, 44 cols)
 """
 
 from pathlib import Path
@@ -33,7 +33,7 @@ HOUSING_DIR      = ROOT / "Methoden Data/X_Original Data/Housing Data Original"
 DELIN_IN         = ROOT / "Methoden Data/X_Original Data/Other Data Original/Census CBSA Delineation File.csv"
 OVERRIDES_IN     = ROOT / "Methoden Data/X_Original Data/Other Data Original/Zillow_RegionID_to_CBSA_overrides.csv"
 BLS_LAUS_IN      = ROOT / "Methoden Data/X_Original Data/Economic Data Original/bls_laus_cbsa_monthly_raw.csv"
-OUT_FILE         = ROOT / "Methoden Data/Modeling Data/Modeling_Table.csv"
+OUT_FILE         = ROOT / "Methoden Data/Modeling_Table.csv"
 
 # Map each Zillow file to its destination column in the modeling table.
 ZILLOW_FILES = {
