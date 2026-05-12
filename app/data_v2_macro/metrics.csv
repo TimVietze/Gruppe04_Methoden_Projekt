@@ -1,6 +1,0 @@
-model,feature_set,mae_pct,rmse_pct,r2,directional_accuracy
-Naive baseline,—,3.3242,4.5006,-0.4774,0.7934
-Ridge,A,4.1539,5.2259,-0.9919,0.7992
-Ridge,B,4.1895,5.0525,-0.8619,0.4951
-RandomForest,B,2.6859,3.5119,0.1004,0.7567
-HistGBT,B,4.2507,5.1799,-0.9571,0.568
