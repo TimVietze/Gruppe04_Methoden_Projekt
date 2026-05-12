@@ -15,8 +15,9 @@ Inputs:
   - 9 Zillow CSVs in Methoden Data/X_Original Data/Housing Data Original/
   - Methoden Data/X_Original Data/Other Data Original/Census CBSA Delineation File.csv
   - Methoden Data/X_Original Data/Other Data Original/Zillow_RegionID_to_CBSA_overrides.csv
+  - Methoden Data/X_Original Data/Economic Data Original/bls_laus_cbsa_monthly_raw.csv
 Output:
-  - Methoden Data/Modeling Data/Modeling_Table.csv  (~270k rows, 43 cols)
+  - Methoden Data/Modeling Data/Modeling_Table.csv  (~270k rows, 44 cols)
 """
 
 from pathlib import Path
@@ -31,6 +32,7 @@ WEATHER_METRO_IN = ROOT / "Methoden Data/Weather Data/Weather_Features_Metro.csv
 HOUSING_DIR      = ROOT / "Methoden Data/X_Original Data/Housing Data Original"
 DELIN_IN         = ROOT / "Methoden Data/X_Original Data/Other Data Original/Census CBSA Delineation File.csv"
 OVERRIDES_IN     = ROOT / "Methoden Data/X_Original Data/Other Data Original/Zillow_RegionID_to_CBSA_overrides.csv"
+BLS_LAUS_IN      = ROOT / "Methoden Data/X_Original Data/Economic Data Original/bls_laus_cbsa_monthly_raw.csv"
 OUT_FILE         = ROOT / "Methoden Data/Modeling Data/Modeling_Table.csv"
 
 # Map each Zillow file to its destination column in the modeling table.
@@ -84,6 +86,15 @@ def map_zillow_region(region_id, region_name, short_to_code, rid_to_code):
         return rid_to_code[rid]
     norm = normalize_text(region_name) if region_name else None
     return short_to_code.get(norm)
+
+
+def read_bls_laus(path):
+    """Load BLS LAUS monthly unemployment rate keyed on (CBSA_CODE, YEAR_MONTH)."""
+    df = pd.read_csv(path, dtype={"CBSA_CODE": str})
+    df["YEAR_MONTH"] = (
+        df["YEAR"].astype(str) + "-" + df["MONTH"].astype(str).str.zfill(2)
+    )
+    return df[["CBSA_CODE", "YEAR_MONTH", "unemployment_rate_monthly"]]
 
 
 def read_zillow_long(path, value_col):
@@ -149,6 +160,15 @@ def main():
     print(f"\n  combined Zillow frame: {len(zillow_combined):,} rows, "
           f"{zillow_combined['CBSA_CODE'].nunique():,} CBSAs")
 
+    # BLS LAUS monthly unemployment (CBSA-level, 2009+) — left-joined onto
+    # weather first so the column lands between precip_in and the zhvi_* cols.
+    # Leaves NaN for 2000-2008 since the LAUS metro series doesn't reach back.
+    print(f"\n  reading {BLS_LAUS_IN.name} ...")
+    bls = read_bls_laus(BLS_LAUS_IN)
+    print(f"    {len(bls):,} rows, {bls['CBSA_CODE'].nunique():,} CBSAs, "
+          f"months {bls['YEAR_MONTH'].min()}..{bls['YEAR_MONTH'].max()}")
+    weather = weather.merge(bls, on=["CBSA_CODE", "YEAR_MONTH"], how="left")
+
     # Inner-join the weather metro table to the Zillow frame on (CBSA_CODE, YEAR_MONTH).
     out = weather.merge(zillow_combined, on=["CBSA_CODE", "YEAR_MONTH"], how="inner")
     out = out[out["YEAR_MONTH"] >= "2000-01"].copy()
@@ -164,6 +184,10 @@ def main():
     for c in ZHVI_COLS:
         n = out[c].notna().sum()
         print(f"  {c:18s}  {n:>9,}  ({100*n/len(out):5.1f}%)")
+
+    n_unemp = out["unemployment_rate_monthly"].notna().sum()
+    print(f"\n[BLS LAUS unemployment_rate_monthly] "
+          f"{n_unemp:,} non-null ({100*n_unemp/len(out):.1f}%) — NaN expected for 2000-2008")
 
     # Worked example
     print("\n[Worked example] Atlanta CBSA 12060, 2024-09:")
