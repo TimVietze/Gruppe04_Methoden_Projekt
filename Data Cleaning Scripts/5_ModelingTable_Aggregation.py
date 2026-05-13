@@ -174,20 +174,54 @@ def main():
     out = out[out["YEAR_MONTH"] >= "2000-01"].copy()
     out = out.sort_values(["CBSA_CODE", "YEAR_MONTH"]).reset_index(drop=True)
 
+    # Forward 6-month lookups — prediction targets. Per-CBSA date-based lookup
+    # (not .shift(-6) positional) of every ZHVI column 6 months later, plus the
+    # row-wise mean across the 9 categories for an aggregate % change. Date-based
+    # so any month gaps don't produce a wrong "6 months ahead" anchor.
+    out["_zhvi_avg"] = out[ZHVI_COLS].mean(axis=1)
+    out["_dt"] = pd.to_datetime(out["YEAR_MONTH"] + "-01")
+    future_cols = ZHVI_COLS + ["_zhvi_avg"]
+    future = out[["CBSA_CODE", "_dt"] + future_cols].rename(
+        columns={"_dt": "_dt_then", **{c: f"__future__{c}" for c in future_cols}}
+    )
+    out["_dt_lookup"] = out["_dt"] + pd.DateOffset(months=6)
+    out = out.merge(
+        future,
+        left_on=["CBSA_CODE", "_dt_lookup"],
+        right_on=["CBSA_CODE", "_dt_then"],
+        how="left",
+    )
+    for c in ZHVI_COLS:
+        out[f"{c}_next_6m"] = out[f"__future__{c}"]
+    out["zhvi_avg_next_6m"] = out["__future___zhvi_avg"]
+    # Fraction, not percent: 1.0 == +100%, 0.01 == +1%, -0.05 == -5%.
+    out["price_change_next_6m"] = (
+        (out["zhvi_avg_next_6m"] - out["_zhvi_avg"]) / out["_zhvi_avg"]
+    )
+    out = out.drop(columns=(
+        ["_zhvi_avg", "_dt", "_dt_lookup", "_dt_then", "__future___zhvi_avg"]
+        + [f"__future__{c}" for c in ZHVI_COLS]
+        + ZHVI_COLS  # drop the current-month ZHVI columns; only 6-mo-ahead targets remain
+    ))
+
     OUT_FILE.parent.mkdir(parents=True, exist_ok=True)
     out.to_csv(OUT_FILE, index=False)
     size_mb = OUT_FILE.stat().st_size / 1_048_576
     print(f"\n  wrote {OUT_FILE.name} -- {len(out):,} rows, {len(out.columns)} cols, {size_mb:.1f} MB")
     print(f"  CBSAs in output: {out['CBSA_CODE'].nunique():,}")
 
-    print("\n[Non-null counts per ZHVI column]")
-    for c in ZHVI_COLS:
-        n = out[c].notna().sum()
-        print(f"  {c:18s}  {n:>9,}  ({100*n/len(out):5.1f}%)")
-
     n_unemp = out["unemployment_rate_monthly"].notna().sum()
     print(f"\n[BLS LAUS unemployment_rate_monthly] "
           f"{n_unemp:,} non-null ({100*n_unemp/len(out):.1f}%) — NaN expected for 2000-2008")
+
+    n_pct = out["price_change_next_6m"].notna().sum()
+    print(f"\n[price_change_next_6m] "
+          f"{n_pct:,} non-null ({100*n_pct/len(out):.1f}%) — NaN for the last 6 months per CBSA")
+
+    print("\n[Non-null counts per *_next_6m column]")
+    for c in ZHVI_COLS:
+        n = out[f"{c}_next_6m"].notna().sum()
+        print(f"  {c+'_next_6m':28s}  {n:>9,}  ({100*n/len(out):5.1f}%)")
 
     # Worked example
     print("\n[Worked example] Atlanta CBSA 12060, 2024-09:")
