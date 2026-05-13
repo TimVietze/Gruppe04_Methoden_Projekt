@@ -201,7 +201,6 @@ def main():
     out = out.drop(columns=(
         ["_zhvi_avg", "_dt", "_dt_lookup", "_dt_then", "__future___zhvi_avg"]
         + [f"__future__{c}" for c in ZHVI_COLS]
-        + ZHVI_COLS  # drop the current-month ZHVI columns; only 6-mo-ahead targets remain
     ))
 
     OUT_FILE.parent.mkdir(parents=True, exist_ok=True)
@@ -209,6 +208,11 @@ def main():
     size_mb = OUT_FILE.stat().st_size / 1_048_576
     print(f"\n  wrote {OUT_FILE.name} -- {len(out):,} rows, {len(out.columns)} cols, {size_mb:.1f} MB")
     print(f"  CBSAs in output: {out['CBSA_CODE'].nunique():,}")
+
+    print("\n[Non-null counts per ZHVI column]")
+    for c in ZHVI_COLS:
+        n = out[c].notna().sum()
+        print(f"  {c:18s}  {n:>9,}  ({100*n/len(out):5.1f}%)")
 
     n_unemp = out["unemployment_rate_monthly"].notna().sum()
     print(f"\n[BLS LAUS unemployment_rate_monthly] "
