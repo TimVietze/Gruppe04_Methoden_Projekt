@@ -1,0 +1,108 @@
+
+================================================================================
+TIME SERIES MODEL - 6 MONTH PRICE CHANGE PREDICTION
+================================================================================
+
+Generated: 2026-05-14 10:36:34
+
+DATA:
+  Total rows: 218,307
+  Training period: 2000-01-01 00:00:00 to 2021-12-01 00:00:00
+  Test period: 2022-01-01 00:00:00 to 2025-08-01 00:00:00
+  Training samples: 180,689
+  Test samples: 37,618
+  
+FEATURES:
+  Total features: 32
+  Feature types: Weather (storms, FEMA), Economic (unemployment), Climate (temp, precip)
+  Note: Housing prices (ZHVI) excluded as requested
+  
+FEATURE LIST:
+  - n_storm_events
+  - damage_property_sum
+  - damage_crops_sum
+  - deaths_total
+  - injuries_total
+  - had_tornado
+  - had_hurricane
+  - had_flood
+  - had_drought
+  - had_heat
+  - had_winter_storm
+  - had_wildfire
+  - n_fema_declarations
+  - fema_active_days
+  - had_major_disaster
+  - had_emergency
+  - had_fire_mgmt
+  - ia_active
+  - ih_active
+  - pa_active
+  - hm_active
+  - had_fema_flood
+  - had_fema_hurricane
+  - had_fema_severe_storm
+  - had_fema_fire
+  - had_fema_tornado
+  - had_fema_earthquake
+  - had_fema_biological
+  - tmax_f
+  - tmin_f
+  - precip_in
+  - unemployment_rate_monthly
+
+MODELS TRAINED:
+  1. Linear Regression (baseline)
+  2. Random Forest (100 trees, max_depth=20)
+  3. XGBoost (100 trees, max_depth=6)
+
+BEST MODEL: Linear Regression
+  R² Score: -1.839213
+  RMSE: 0.045068
+  MAE: 0.032942
+
+MODEL COMPARISON:
+            Model     RMSE      MAE  R² Score  Test Samples
+Linear Regression 0.045068 0.032942 -1.839213         37618
+    Random Forest 0.047859 0.034444 -2.201757         37618
+          XGBoost 0.045971 0.033243 -1.954035         37618
+
+TOP 10 FEATURES (Random Forest):
+                  Feature  Importance
+         fema_active_days    0.371302
+unemployment_rate_monthly    0.184670
+                precip_in    0.154789
+                   tmax_f    0.109765
+                   tmin_f    0.079041
+      damage_property_sum    0.019449
+           n_storm_events    0.012056
+              had_drought    0.007523
+      n_fema_declarations    0.007308
+                had_flood    0.006346
+
+TOP 10 FEATURES (XGBoost):
+                  Feature  Importance
+         fema_active_days    0.337414
+      had_fema_biological    0.246494
+unemployment_rate_monthly    0.072538
+                had_flood    0.026428
+            had_emergency    0.023770
+       had_fema_hurricane    0.023148
+            had_fema_fire    0.021556
+                precip_in    0.020590
+             had_wildfire    0.016105
+                ia_active    0.015997
+
+OUTPUT FILES:
+  01_Model_Comparison.csv - Model metrics side-by-side
+  02_RF_Feature_Importance.csv - Random Forest feature importance
+  03_XGBoost_Feature_Importance.csv - XGBoost feature importance
+  04_Test_Set_Predictions.csv - Predictions on test set (2022-02 onwards)
+  05_Residuals_Analysis.csv - Error analysis
+  model_linear_regression.pkl - Trained Linear Regression model
+  model_random_forest.pkl - Trained Random Forest model
+  model_xgboost.pkl - Trained XGBoost model
+  scaler.pkl - Feature scaler for new predictions
+  feature_columns.txt - List of input features
+  
+================================================================================

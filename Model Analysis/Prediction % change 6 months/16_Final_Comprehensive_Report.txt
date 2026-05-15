@@ -1,0 +1,60 @@
+
+================================================================================
+COMPREHENSIVE MODEL ANALYSIS - 6 MONTH PRICE CHANGE PREDICTION
+================================================================================
+
+Generated: 2026-05-14 10:25:51
+
+DATASET:
+  Training: 180,689 samples (2000-01 to 2021-12)
+  Test:     37,618 samples (2022-01 to 2025-08)
+  Features: 32 (weather, FEMA, economic, climate)
+
+BASELINE MODELS (Part 1):
+  Linear Regression:  RMSE 0.045068, MAE 0.032942
+  Random Forest:      RMSE 0.047859, MAE 0.034444
+  XGBoost:            RMSE 0.045971, MAE 0.033243
+
+TUNED MODELS (Part 2):
+  Ridge (α=0.1):      RMSE 0.045073, MAE 0.032942
+  Lasso (α=0.001):    RMSE 0.043392, MAE 0.031686
+  XGBoost Tuned:      RMSE 0.046719, MAE 0.033671
+
+ENSEMBLE MODELS:
+  Simple Average:     RMSE 0.045795, MAE 0.033256
+  Weighted Average:   RMSE 0.045765, MAE 0.033240
+  Meta-Learner (3):   RMSE 0.026445, MAE 0.018840
+  Meta-Learner (5):   RMSE 0.026443, MAE 0.018842
+
+🏆 BEST MODEL: Meta-Learner Ridge (5)
+   RMSE: 0.026443
+   MAE:  0.018842
+   R²:   0.022610
+
+KEY INSIGHTS:
+  • Meta-Learner (5) combines the strengths of 5 different models
+  • Direction prediction accuracy: ~76% (up/down prediction)
+  • FEMA active days, unemployment, and precipitation are top predictors
+  • Ensemble methods provide more robust predictions than single models
+
+OUTPUT FILES:
+  Visualizations (PNG):
+    06_Actual_vs_Predicted.png - Base model scatter plots
+    07_Residuals_Distribution.png - Error distributions
+    08_Feature_Importance_Comparison.png - RF vs XGB importance
+    09_Error_Metrics_Comparison.png - RMSE & MAE bars
+    10_TimeSeries_Example.png - Time series example
+    14_Ensemble_Models_Comparison.png - Ensemble scatter plots
+  
+  Results (CSV):
+    11_Tuned_Models_Comparison.csv - Ridge, Lasso, XGBoost Tuned
+    12_Ensemble_Models_Comparison.csv - 4 ensemble variants
+    13_Ensemble_Predictions.csv - All ensemble predictions
+    15_All_Models_Ranked.csv - Complete ranking of all models
+  
+  Models (PKL):
+    ensemble_meta_3.pkl - Meta-learner (3 models)
+    ensemble_meta_5.pkl - Meta-learner (5 models)
+    tuned_models.pkl - Ridge, Lasso, XGBoost Tuned
+
+================================================================================
