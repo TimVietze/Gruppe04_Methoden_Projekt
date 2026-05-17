@@ -1,377 +1,208 @@
 ================================================================================
-FS26 Methoden Project — Data Cleaning & Aggregation
+FS26 Methoden Project — ClimateHome
+Mini-Capstone "Data Science & AI for Business", University of St. Gallen
 ================================================================================
 
-Mini capstone for "Data Science & AI for Business" (FS26, HSG). The goal is a
-Streamlit application that predicts US county-level housing prices over the
-next ~12 months from past weather, FEMA disaster, and economic data, so
-investors can identify counties that look attractive vs. risky.
+Goal
+----
+Help investors spot attractive vs. risky U.S. metro housing markets by
+combining a 6-month price forecast with a 6-month climate-damage risk
+forecast. End product: a Streamlit dashboard ("ClimateHome — Investor View").
 
-This README documents the data pipeline that turns the raw downloads under
-`Methoden Data/X_Original Data/` into the modeling-ready feature table
-`Methoden Data/Weather Data/Weather_Features.csv`.
-
-
-================================================================================
-Data sources (raw)
-================================================================================
-
-NOAA Storm Events:
-    https://www.ncei.noaa.gov/stormevents/ftp.jsp
-    -> per-year CSVs, 2000..2026, in
-       Methoden Data/X_Original Data/Weather Data Original/Storm Original/
-
-FEMA Disaster Declarations Summary v2:
-    https://www.fema.gov/openfema-data-page/disaster-declarations-summaries-v2
-    -> single CSV (1953..present) in
-       Methoden Data/X_Original Data/Weather Data Original/
-
-NOAA nClimDiv (per-county monthly temperature & precipitation):
-    https://www.ncei.noaa.gov/pub/data/cirs/climdiv/
-    -> processed externally into Temp_per_county_month.csv in
-       Methoden Data/X_Original Data/Weather Data Original/
-
-Zillow ZHVI (housing target):
-    https://www.zillow.com/research/data/
-    -> per-tier CSVs in
-       Methoden Data/X_Original Data/Housing Data Original/
-
-Census CBSA Delineation File / County Population:
-    https://www.census.gov/newsroom/press-kits/2017/20170323_popestimates.html
-    -> Population
-
-    https://www.census.gov/geographies/reference-files/time-series/demo/metro-micro/delineation-files.html
-    -> Delineation File
-
-================================================================================
-Folder layout
-================================================================================
-
-Methoden Data/
-    X_Original Data/                 immutable raw downloads, never edited
-        Housing Data Original/       Zillow ZHVI per tier / bedroom count
-            Zillow_Filename_Tokens.csv  (dictionary of filename tokens)
-        Weather Data Original/
-            Storm Original/          27 yearly NOAA Storm Events CSVs
-            Fema_DisasterDeclarationsSummaries.csv
-            Fema_Disaster_Declarations_Fields.csv  (field dictionary)
-            Temp_per_county_month.csv
-        Other Data Original/
-            Census CBSA Delineation File.csv
-            Census county population.csv
-            Zillow_RegionID_to_CBSA_overrides.csv  (manual map for unmatchable Zillow regions)
-    Weather Data/                    cleaned outputs of the pipeline
-        Storm/StormEvents_ALL.csv
-        Fema/Fema_DisasterDeclarations_Cleaned.csv
-        Weather_Features.csv         <- the county-level feature table
-        Weather_Features_Metro.csv   <- the metro-level feature table (output of stage 4)
-    Modeling Data/                   final modeling-ready outputs
-        Modeling_Table.csv           <- weather + 9 ZHVI variants joined on (CBSA, month)
-
-Data Cleaning Scripts/
-    1_StormEvents_Aggregation.py
-    2_Fema_DisasterDeclarations_Cleaning.py
-    3_WeatherFeatures_Aggregation.py
-    4_WeatherFeatures_Metro_Aggregation.py
-    5_ModelingTable_Aggregation.py
+Pipeline overview
+-----------------
+    [Raw data]  ->  [Data Cleaning Scripts]  ->  Modeling_Table.csv
+                            |
+                            v
+    [Model Analysis]  ->  trained models + result CSVs
+                            |
+                            v
+    [streamlit_app]   ->  interactive map + metro-level verdicts
 
 
 ================================================================================
-Pipeline (run in this order)
+1. DATA
 ================================================================================
+Raw inputs (Methoden Data/X_Original Data/)
+  - Zillow ZHVI            : 9 housing-price variants per metro & month
+                             (bottom/top tier, single-family, condo, 1-5br)
+  - NOAA Storm Events      : 27 yearly CSVs (2000-2026) — storms, damages, deaths
+  - FEMA Disaster Decl.    : federal disaster declarations since 1953
+  - NOAA nClimDiv          : monthly temperature & precipitation per county
+  - BLS LAUS               : monthly unemployment per metro
+  - Census CBSA / pop.     : metro delineation & county population weights
 
-1) 1_StormEvents_Aggregation.py
-   IN:  27 yearly Storm Original/StormEvents_YYYY.csv files
-   OUT: Methoden Data/Weather Data/Storm/StormEvents_ALL.csv  (~78 MB)
-
-   - Combines all year files into one chronological CSV (2000-01 .. 2026-04).
-   - Drops the 33 columns we don't need for county-month modeling: the two
-     long event narratives (~1 GB of free text), redundant date breakdowns,
-     sub-county lat/lon/location strings, admin metadata (WFO, SOURCE, IDs,
-     STATE name -- recovered later), and the rarely-populated tornado
-     "other county" fields.
-   - Drops rows with CZ_TYPE='M' (marine zones, no land housing impact).
-   - Drops zero-impact rows (no damage, no injuries, no deaths) for low-signal
-     event types: Hail, Thunderstorm Wind, Heavy Snow, Heavy Rain, Dense Fog,
-     Lightning, Frost/Freeze, Winter Weather. Tornado / Flood / Hurricane /
-     Drought / Heat zero-impact rows are kept -- the occurrence itself is the
-     signal for those.
-   - Parses DAMAGE_PROPERTY / DAMAGE_CROPS from "2K" / "1.50M" / "100B"
-     strings into floats (NaN preserved, not coerced to 0).
-   - Builds BEGIN_DATE / END_DATE as YYYY-MM-DD (drops time-of-day, which
-     adds nothing at month-county grain).
-   - Re-adds STATE and CZ_NAME (county name) so the file isn't only numbers.
-
-   ~1.6M raw rows -> ~910k rows, 51 cols -> 20 cols.
-
-2) 2_Fema_DisasterDeclarations_Cleaning.py
-   IN:  Fema_DisasterDeclarationsSummaries.csv  (~70k rows, 28 cols)
-   OUT: Methoden Data/Weather Data/Fema/Fema_DisasterDeclarations_Cleaned.csv
-        (~3.6 MB, ~50k rows, 14 cols)
-
-   - Keeps only fields useful for a county-month feature pipeline: FIPS join
-     keys, the three relevant date columns (incidentBeginDate / End /
-     declarationDate), the categorical hazard fields, and the four assistance
-     program flags (IA, IH, PA, HM) as severity proxies. Drops admin
-     identifiers, free-text titles, and program filing/closeout dates.
-   - Zero-pads FIPS codes as strings (so leading zeros survive joins).
-   - Adds derived `is_statewide` flag for rows with fipsCountyCode='000' so
-     downstream code can decide whether to drop or explode them.
-   - Filters to incidents on/after 2000-01-01 to align with Zillow coverage.
-
-3) 3_WeatherFeatures_Aggregation.py
-   IN:  StormEvents_ALL.csv,
-        Fema_DisasterDeclarations_Cleaned.csv,
-        Fema_DisasterDeclarationsSummaries.csv (raw, for designatedArea
-            fallback name lookup),
-        Temp_per_county_month.csv
-   OUT: Methoden Data/Weather Data/Weather_Features.csv  (~99 MB, 36 cols,
-        ~1M rows, 3,416 unique counties, 2000-01 .. 2026-04)
-
-   Builds the unified county x month feature table that joins directly to
-   Zillow on (STATE_FIPS, COUNTY_FIPS, YEAR_MONTH).
-
-   Storm aggregation:
-     - CZ_TYPE='C' rows -> per-county damage / death / injury sums plus
-       per-county hazard flags (had_tornado, had_flood, ...).
-     - CZ_TYPE='Z' rows -> state-level hazard-flag fallback. Many hazards
-       (Hurricane, Drought, Winter Storm, Heat, Wildfire) are reported by
-       NOAA at the NWS-zone level, not the county level. Without a
-       zone->county crosswalk we can't put their damages in a specific
-       county, but we can OR-aggregate the boolean had_* flags per
-       (state, month) and then propagate them to every county-month in that
-       state. This is why had_hurricane fires on ~18,600 county-months
-       instead of just ~2.
-
-   FEMA aggregation:
-     - is_statewide rows are dropped.
-     - Each declaration is exploded across the months its incident was
-       active, so a 6-week event contributes to two months. fema_active_days
-       records how many days of the month were under the declaration.
-     - n_fema_declarations, had_major_disaster (DR), had_emergency (EM),
-       had_fire_mgmt (FM), the four assistance-program flags, and per-
-       hazard flags (had_fema_flood, had_fema_hurricane, ...).
-
-   Temperature merge:
-     - tmax_f and tmin_f (rounded to integer; 0.5 deg F is noise at month-
-       county grain) and precip_in (kept as float, real variability).
-     - tavg_f is dropped because it equals (tmax_f + tmin_f) / 2.
-
-   Names:
-     - STATE and COUNTY columns are added back so the table is human-readable.
-     - 3-tier fallback handles edge cases:
-         1. NOAA Storm STATE / CZ_NAME (covers ~98%)
-         2. Hardcoded territory map for STATE_FIPS that NOAA codes
-            non-standardly (Puerto Rico=72 Census vs 99 NOAA, etc.)
-         3. FEMA designatedArea (parenthetical stripped, uppercased)
-         4. Temp county_name (suffix stripped: "County", "Parish",
-            "Borough", "Census Area", "Municipality", "City and Borough")
-     - Final coverage: 0 rows missing STATE, 0 rows missing COUNTY.
-
-   Size discipline (the table is checked into git, so it has to fit under
-   GitHub's 100 MiB per-file limit):
-     - Booleans encoded as 0/1 int8 (instead of "True"/"False") -- ~85 MB
-       saving.
-     - Damage / count columns saved as integers (no .0 suffix) -- ~7 MB.
-     - Three sparse max_* columns dropped (NaN in 99%+ of rows).
-     - tavg_f dropped (derivable).
-     - tmax_f / tmin_f rounded to integer.
-
-4) 4_WeatherFeatures_Metro_Aggregation.py
-   IN:  Weather_Features.csv,
-        Census CBSA Delineation File.csv,
-        Census county population.csv
-   OUT: Methoden Data/Weather Data/Weather_Features_Metro.csv
-        (~28 MB, ~290k rows, 34 cols, ~930 CBSAs)
-
-   Aggregates the county-level Weather_Features to metro level (CBSA), so the
-   table can join Zillow's metro-level ZHVI files. Each column gets its own
-   aggregation rule based on what the variable means:
-
-     - Sum: n_storm_events, damage_property_sum, damage_crops_sum,
-       deaths_total, injuries_total, n_fema_declarations  (additive across
-       counties of a metro).
-     - Max (OR): every had_* and *_active 0/1 flag (16 cols)  (if any county
-       in the metro experienced the hazard, the metro experienced it).
-     - Population-weighted mean: tmax_f, tmin_f, precip_in, fema_active_days
-       (intensity variables; weighted by Census POPESTIMATE2016 so a 5M
-       county counts more than a 5,000 desert county).
-
-   Counties without a CBSA mapping (rural, ~1,500) are dropped -- Zillow has
-   no price for them. The uploaded Census county population file only covers
-   counties inside Combined Statistical Areas (~60% of CBSA counties), so
-   counties without population fall back to weight=1; they then contribute
-   negligibly to weighted means while their sum/max contributions stay intact.
-
-5) 5_ModelingTable_Aggregation.py
-   IN:  Weather_Features_Metro.csv,
-        9 Zillow ZHVI CSVs in Housing Data Original/,
-        Census CBSA Delineation File.csv,
-        Zillow_RegionID_to_CBSA_overrides.csv
-   OUT: Methoden Data/Modeling Data/Modeling_Table.csv
-        (~53 MB, ~225k rows, 43 cols, ~855 CBSAs)
-
-   Joins all 9 Zillow ZHVI variants onto the metro weather table, producing
-   the final modeling-ready file.
-
-   Zillow regions are mapped to Census CBSA codes by:
-     1. Shortening each Census CBSA Title from "Atlanta-Sandy
-        Springs-Roswell, GA" to "Atlanta, GA" (city prefix + state),
-     2. Unicode-normalizing both sides,
-     3. Looking up Zillow's RegionName in the resulting dictionary,
-     4. Falling back to a 6-line manual override file for cases the
-        shortener cannot reach (Louisville, The Villages, Ogdensburg,
-        London KY, California MD, Glenwood Springs).
-
-   Match rate: 96.6% (864 of 894 Zillow MSA rows). The remaining ~30
-   unmatched rows are SizeRank > 500 micropolitan areas Zillow lists but
-   Census assigns to different parent CBSAs already covered by separate
-   Zillow rows -- mapping them would create duplicate keys, so they are
-   intentionally dropped.
-
-   Each Zillow file is melted from wide format (one column per month) to
-   long, attached to its CBSA_CODE, and combined into a single wide frame
-   keyed (CBSA_CODE, YEAR_MONTH) with one column per ZHVI variant. The
-   weather table is then inner-joined onto it. Pre-2000 Zillow rows are
-   dropped (no weather features to pair with). ZHVI cells with no value
-   stay NaN -- not all metros have data for all variants (small metros
-   often miss the 5+ bedroom slice).
+Cleaned outputs (Methoden Data/)
+  - Weather Data/Weather_Features.csv         county x month, 36 cols, ~1M rows
+  - Weather Data/Weather_Features_Metro.csv   CBSA x month, 34 cols, ~290k rows
+  - Modeling_Table.csv                        the master modeling table
+                                              (CBSA x month, 43 cols, ~225k rows,
+                                              855 metros, weather + 9 ZHVI cols)
+  - Geo Data/CBSA_20m.geojson                 metro boundaries for the map
 
 
 ================================================================================
-Output: Weather_Features.csv schema
+2. DATA CLEANING (Data Cleaning Scripts/)  -- run in order
 ================================================================================
+  1_StormEvents_Aggregation.py
+     Combines 27 yearly NOAA files, drops noise (marine zones, zero-impact
+     low-signal events, free-text narratives), parses damage strings
+     ("2K"/"1.50M") to floats. 1.6M -> 910k rows.
 
-Keys (3):                 STATE_FIPS, COUNTY_FIPS, YEAR_MONTH (YYYY-MM)
-Names (2):                STATE, COUNTY  (uppercase, no suffix)
+  2_Fema_DisasterDeclarations_Cleaning.py
+     Keeps the FIPS join keys, the 3 date columns, hazard categories, and the
+     4 assistance-program flags (IA/IH/PA/HM). Filters to >=2000-01-01.
 
-Storm side (12):
-    n_storm_events        count of CZ_TYPE='C' events that month
-    damage_property_sum   USD, integer
-    damage_crops_sum      USD, integer
-    deaths_total          DEATHS_DIRECT + DEATHS_INDIRECT
-    injuries_total        INJURIES_DIRECT
-    had_tornado, had_hurricane, had_flood, had_drought, had_heat,
-    had_winter_storm, had_wildfire   (0/1; OR over C-rows in this county
-                                      and Z-rows in this state)
+  3_WeatherFeatures_Aggregation.py
+     Joins storm + FEMA + temperature into one county-month feature table.
+     County-level damage sums; state-level OR fallback for NWS-zone rows
+     (Z-type) covering hurricanes/drought/winter storms. Adds named state/
+     county columns via 4-tier fallback.
 
-FEMA side (16):
-    n_fema_declarations         declarations active this month
-    fema_active_days            days of the month under any declaration
-    had_major_disaster (DR), had_emergency (EM), had_fire_mgmt (FM)
-    ia_active, ih_active, pa_active, hm_active   assistance-program flags
-    had_fema_flood, had_fema_hurricane, had_fema_severe_storm,
-    had_fema_fire, had_fema_tornado, had_fema_earthquake,
-    had_fema_biological
+  4_WeatherFeatures_Metro_Aggregation.py
+     Aggregates county -> CBSA using meaningful rules per column:
+        sums for counts/damages, OR for hazard flags, population-weighted
+        means for temperature/precipitation.
 
-Temperature (3):
-    tmax_f, tmin_f       degrees Fahrenheit, integer
-    precip_in            inches, float (2 decimals)
+  5_ModelingTable_Aggregation.py
+     Maps Zillow regions to Census CBSAs (96.6% match rate via name-shorten
+     transform + 6-entry manual override file). Melts the 9 ZHVI variants
+     and inner-joins onto the metro weather table.
 
-
-================================================================================
-Output: Weather_Features_Metro.csv schema  (Stage 4)
-================================================================================
-
-Keys (3):                 CBSA_CODE, CBSA_TITLE, YEAR_MONTH (YYYY-MM)
-
-The 31 feature columns are inherited from Weather_Features.csv but aggregated
-to CBSA-month grain (sum / OR / pop-weighted mean -- see stage 4 in the
-Pipeline section above).
-
-STATE, COUNTY, STATE_FIPS, COUNTY_FIPS are dropped -- replaced by CBSA_CODE
-(5-digit Census code) and CBSA_TITLE (full Census title, e.g.
-"Atlanta-Sandy Springs-Roswell, GA").
+  6_CBSA_Geodata.py
+     Downloads the Census 1:20m CBSA shapefile and filters it to the 855
+     CBSAs that appear in the modeling table -> CBSA_20m.geojson (for the map).
 
 
 ================================================================================
-Output: Modeling_Table.csv schema  (Stage 5)
+3. MODELING (Model Analysis/)
 ================================================================================
+Three independent modeling tracks, each in its own folder with code, trained
+.pkl models, and result CSVs/plots.
 
-Keys (3):                 CBSA_CODE, CBSA_TITLE, YEAR_MONTH
+(A) Prediction % change 6 months/
+    First attempt at the actual business question: forecast the 6-month %
+    price change from climate + economic features only (no housing prices).
+    Result: best model R^2 = -1.8 -> climate/disaster signal alone is not
+    enough to predict the % change. Useful negative result; informs why
+    Track (B) was added.
 
-Weather (31):             all 31 feature columns from Weather_Features_Metro
+(B) Prediction absolute price 6 months/         <-- powers the dashboard
+    Predicts the absolute price (USD) 6 months out per (metro, category).
+    Pipeline:
+      1 Table Adjustment/  filter >= 2015-01, melt 9 ZHVI cols into a long
+                           "category" column, drop NaN rows, log-transform
+                           prices  -> Modeling_Table_absolute.csv (874k rows)
+      2 Modeling/          two experiments share identical code except for
+                           the feature list:
+                             "prices as feature"     uses log(price_now)
+                             "no prices as feature"  drops price_now (stress
+                                                     test of non-price signal)
+      3 Results/           summary report, model comparison, per-category
+                           metrics, best hyperparameters, hold-out predictions,
+                           5 pickled best models per experiment, comparison
+                           graphs.
+    Method:
+      - Log-target regression (multiplicative pricing -> additive in log)
+      - CBSA fed as feature: one-hot (sparse) for linear, ordinal for trees
+      - TimeSeriesSplit(5) + RandomizedSearchCV(n_iter=10) on the train block
+      - Hold-out test: rows after 2024-08
+      - 5 algorithms compared: LinearRegression, Ridge, RandomForest,
+        XGBoost, HistGradientBoosting
+    Result:
+      - With price_now : Ridge wins with R^2 = 0.998, test RMSE ~ $12k
+                         (model essentially learns "price_now x growth rate")
+      - Without price  : Ridge again wins with R^2 = 0.86, RMSE ~ $100k
+                         (CBSA fixed effects carry most of the remaining signal)
+    The "prices as feature" Ridge predictions for 2026-02 -> 2026-08 are the
+    price feed for the dashboard (see absolute_predict_2026_02.py).
 
-Housing (9):              one column per Zillow ZHVI variant
-    zhvi_all_bottom         all-homes bottom-tier  (~5th-35th percentile)
-    zhvi_all_top            all-homes top-tier     (~65th-95th percentile)
-    zhvi_sfr_mid            single-family mid-tier
-    zhvi_condo_mid          condos mid-tier
-    zhvi_1br_mid ..         mid-tier homes broken out by bedroom count
-    zhvi_5br_mid              (1, 2, 3, 4, 5+ bedrooms)
-
-ZHVI cells stay NaN where Zillow has no value for that (metro, month) -- not
-all metros have data for all variants. The modeling code is responsible for
-handling missingness per target.
-
-See Methoden Data/X_Original Data/Housing Data Original/Zillow_Filename_Tokens.csv
-for full documentation of the Zillow filename tokens (uc, sfrcondo, sfr,
-condo, tier, sm_sa, etc).
-
-
-================================================================================
-Known caveats
-================================================================================
-
-1. NWS-zone storm rows (CZ_TYPE='Z', ~half of NOAA's data) currently
-   contribute only to boolean had_* flags via a state-level fallback. Their
-   damage and death numbers are NOT attributed to specific counties because
-   we lack an NWS zone -> county crosswalk. Adding that crosswalk and
-   re-running WeatherFeatures_Aggregation.py will make hurricane / drought /
-   winter-storm damages show up at the county level too.
-
-2. Total deaths in the storm data (DEATHS_DIRECT + DEATHS_INDIRECT in the
-   StormEvents file) match NOAA's separate StormEvents_Fatalities file to
-   within 0.3%. The fatalities file was therefore retired from this pipeline
-   -- no information loss for the modeling target.
-
-3. FEMA rows with is_statewide=True (fipsCountyCode='000', ~1,100 rows) are
-   dropped in WeatherFeatures_Aggregation. They could be exploded across all
-   counties of the state instead, but doing so without population/area
-   weighting would over-count.
-
-4. FEMA STATE_FIPS uses standard Census codes; NOAA Storm Events uses its
-   own non-standard codes for several territories (Puerto Rico = 99 in NOAA
-   but 72 in Census, Guam = 98 vs 66, ...). Where the codes diverge they
-   show up as separate rows in Weather_Features.csv. Zillow uses Census
-   codes, so the Census side is the join-correct one.
-
-5. NOAA data starts 2000-01; that is the cutoff used everywhere in this
-   pipeline. Earlier FEMA history is dropped during cleaning.
-
-6. The uploaded Census county population file is a CSA-restricted subset of
-   the Census Population Estimates Program. It only contains counties that
-   are part of Combined Statistical Areas, leaving ~40% of CBSA counties
-   without a population weight. Stage 4 falls back to weight=1 for those,
-   which means they contribute negligibly to pop-weighted temperature /
-   precipitation but their sums (damage, deaths, event counts) and OR
-   flags are unaffected. Replacing the file with a full county Population
-   Estimates file would tighten the temperature weighting; not a blocker.
-
-7. Zillow region names are not directly Census CBSA codes. Stage 5 uses a
-   name-shorten transform plus a small (6-entry) manual override file to
-   map Zillow RegionID -> CBSA_CODE. Achieves 96.6% match. Roughly 30
-   tiny micropolitan areas (SizeRank > 500) Zillow lists are intentionally
-   dropped because their Census parent CBSA already has a separate Zillow
-   row -- mapping them would corrupt the modeling table.
-
-8. The all-homes mid-tier ZHVI is missing from the project. Zillow only
-   distributes that variant in non-seasonally-adjusted form, which mixes
-   poorly with the SA variants used everywhere else. The mid-tier is still
-   available indirectly via the property-type slices (sfr_mid, condo_mid)
-   and the bedroom-count slices (1br_mid through 5br_mid).
+(C) Prediction Damage Property 6 month/
+    Two-stage damage-risk model (climate/disaster features only, no prices):
+      1. Classification: will any property damage occur in next 6 months?
+         (LogReg / RandomForest / HistGB)
+      2. Regression:    if it does, how large in USD?
+         (Ridge / RandomForest / HistGB on log_damage_sum_next_6m)
+    Cross-validation uses 11 expanding yearly folds (train ends Dec of
+    year N, test is the following year). Final per-metro output combines
+    P(damage) * E[damage|damage] -> expected_damage_6m, which is then
+    percentile-ranked into a business_risk_score (Low / Moderate / High /
+    Very High). This is the risk feed for the dashboard.
 
 
 ================================================================================
-Reproduce
+4. STREAMLIT APP (streamlit_app/)
 ================================================================================
+Loads the two model outputs for the Feb 2026 baseline (forecast window
+Mar-Aug 2026) and joins them per metro:
 
-cd "FS26_Methoden_Project"
-python3 "Data Cleaning Scripts/1_StormEvents_Aggregation.py"
-python3 "Data Cleaning Scripts/2_Fema_DisasterDeclarations_Cleaning.py"
-python3 "Data Cleaning Scripts/3_WeatherFeatures_Aggregation.py"
-python3 "Data Cleaning Scripts/4_WeatherFeatures_Metro_Aggregation.py"
-python3 "Data Cleaning Scripts/5_ModelingTable_Aggregation.py"
+  app.py   entry point, layout, sidebar filters
+  data.py  pure pandas loaders + the score join
+             price_change_pct      from Ridge predictions (Track B)
+             damage_risk_percentile, expected_damage_6m  from Track C
+             combined_score = price_change_percentile - risk_percentile
+                              (range ~ -100 ... +100)
+  viz.py   Plotly choropleth on CBSA_20m.geojson + KPI cards + Top10/
+           Bottom10 tables + per-metro detail panel
+  text.py  category labels, risk bands, and the rule-based investor verdict
+             ("Strong buy", "High reward / high risk", "Avoid", ...)
+  tests/   unit tests for data and text modules
 
-Outputs land in `Methoden Data/Weather Data/` (stages 1-4) and
-`Methoden Data/Modeling Data/` (stage 5).
+User picks a housing category and a map metric (Investor Score / Price
+change / Risk percentile). Each metro click expands to current price,
+forecast price, expected damage, and the verdict.
+
+Run locally
+    pip install -r streamlit_app/requirements.txt
+    streamlit run streamlit_app/app.py
+
+
+================================================================================
+5. REPRODUCE END-TO-END
+================================================================================
+    # 1. Clean data
+    python3 "Data Cleaning Scripts/1_StormEvents_Aggregation.py"
+    python3 "Data Cleaning Scripts/2_Fema_DisasterDeclarations_Cleaning.py"
+    python3 "Data Cleaning Scripts/3_WeatherFeatures_Aggregation.py"
+    python3 "Data Cleaning Scripts/4_WeatherFeatures_Metro_Aggregation.py"
+    python3 "Data Cleaning Scripts/5_ModelingTable_Aggregation.py"
+    python3 "Data Cleaning Scripts/6_CBSA_Geodata.py"
+
+    # 2. Train models (output: .pkl + result CSVs)
+    python3 "Model Analysis/Prediction absolute price 6 months/1 Table Adjustment/absolute_modeling_table_adjustment.py"
+    python3 "Model Analysis/Prediction absolute price 6 months/2 Modeling/prices as feature/absolute_modeling_training_testing.py"
+    python3 "Model Analysis/Prediction absolute price 6 months/2 Modeling/prices as feature/absolute_predict_2026_02.py"
+    python3 "Model Analysis/Prediction Damage Property 6 month/damage_prediction_6m.py"
+
+    # 3. Launch the dashboard
+    streamlit run streamlit_app/app.py
+
+
+================================================================================
+6. REPO LAYOUT
+================================================================================
+    Methoden Data/                  raw + cleaned data, geojson
+    Data Cleaning Scripts/          steps 1 - 6 above
+    Model Analysis/                 three modeling tracks (% change,
+                                    absolute price, damage risk)
+    streamlit_app/                  dashboard (app + data + viz + text + tests)
+    ClimateHome_Proposal.pdf        the original project proposal
+    docs/                           internal notes (Claude superpowers)
+    ClassDocuments/                 (gitignored) lecture materials
+
+
+================================================================================
+7. KNOWN LIMITATIONS
+================================================================================
+  - NWS-zone storm rows contribute only to boolean flags (no county-level
+    crosswalk for hurricane/drought damages yet).
+  - The Census population file is CSA-restricted; ~40% of CBSA counties
+    fall back to weight=1 in the temperature aggregation.
+  - "prices as feature" inflates R^2 because price_now is by far the
+    strongest predictor of price_next_6m. The "no prices" experiment is
+    the honest test of how much climate/economic signal there is.
+  - Track (A) showed that predicting % change from climate-only features
+    is not feasible at this horizon -- the dashboard therefore uses the
+    absolute-price model and derives % change from it.
+  - Several proposal data sources (USFS wildfire perimeters, NOAA heat
+    days, USGS earthquakes, EPA AQI) are not yet wired in.
