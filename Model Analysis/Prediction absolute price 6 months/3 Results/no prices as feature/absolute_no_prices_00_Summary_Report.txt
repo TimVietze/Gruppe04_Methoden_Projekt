@@ -1,0 +1,31 @@
+ABSOLUTE PRICE 6M — TRAIN / TEST (log target, CBSA, NO price_now)
+Generated: 2026-05-17 17:56:37
+
+Data:     Modeling_Table_absolute.csv  (874,461 clean long-format rows)
+Target:   log_price_next_6m   (predictions exp()-converted back to $ for metrics)
+Features: 44 numeric + 1 CBSA (855 unique codes)
+          (price_now + log_price_now EXCLUDED — weather + econ + disaster + category dummies + time + CBSA)
+CV:       TimeSeriesSplit(5)   RandomizedSearch n_iter=10
+Split:    train ≤ 2024-08-01   /   test > 2024-08-01
+
+MODEL RANKING (test set, $-scale RMSE / MAE / R²; CV_RMSE_log is log-$ CV score):
+            Model  CV_RMSE_log          RMSE           MAE       R2
+            ridge     0.180304  99996.747869  44533.489129 0.862887
+linear_regression          NaN 100024.326280  44543.088547 0.862812
+          xgboost     0.344868 151031.968802  77379.141884 0.687216
+gradient_boosting     0.363870 167477.643652  85244.601389 0.615391
+    random_forest     0.472639 241514.961285 112518.928136 0.200176
+
+PER-CATEGORY (best model = ridge, $-scale):
+Model   Category  N_Rows          RMSE          MAE       R2
+ridge    1br_mid    7728  42431.619875 28727.597839 0.869658
+ridge    2br_mid    9792  34772.574663 24854.076853 0.937666
+ridge    3br_mid   10176  40700.565453 26016.378889 0.942315
+ridge    4br_mid    9852  81696.290477 48349.553621 0.890477
+ridge    5br_mid    8724 232736.995123 97430.267496 0.723697
+ridge all_bottom   10224  37828.085380 28319.038457 0.903828
+ridge    all_top   10260 131699.243892 69746.967019 0.859066
+ridge  condo_mid    6048  82057.135659 59275.889043 0.643940
+ridge    sfr_mid   10260  39933.678935 27197.788418 0.955429
+
+Best model: ridge

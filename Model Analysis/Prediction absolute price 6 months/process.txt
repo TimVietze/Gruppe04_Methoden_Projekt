@@ -1,0 +1,318 @@
+================================================================================
+PROCESS DOCUMENTATION
+Modul: Vorhersage des absoluten Immobilienpreises in 6 Monaten
+Pfad : Model Analysis / Prediction absolute price 6 months /
+================================================================================
+
+Dieses Dokument fasst zusammen, wie die Modelle in diesem Ordner entstanden
+sind: welche Daten verwendet wurden, welche Transformationen wir angewendet
+haben, wie die Hyperparameter-Suche aufgebaut ist, welche zwei Experimente
+verglichen werden und welche Erkenntnisse daraus entstanden sind.
+
+
+--------------------------------------------------------------------------------
+1. ZIEL DES MODELLS
+--------------------------------------------------------------------------------
+Wir wollen für jede US-Metropolregion (CBSA) und jede der neun Zillow-
+Wohnsegment-Kategorien (Bottom-Tier, Top-Tier, SFR-Mid, Condo-Mid sowie die
+fünf Schlafzimmer-Klassen 1br..5br) den absoluten Preis (in USD) sechs Monate
+in der Zukunft prognostizieren.
+
+Geschäftliche Idee aus dem Proposal: Investor:innen sollen über eine
+Streamlit-App identifizieren können, in welchen Regionen sich ein
+Immobilieninvestment kurzfristig (~6 Monate) lohnt.
+
+
+--------------------------------------------------------------------------------
+2. DATENBASIS
+--------------------------------------------------------------------------------
+Ausgangsdatei: Methoden Data / Modeling_Table.csv
+  - ~270k Zeilen (CBSA × Monat, 2009–2025)
+  - 855 CBSAs, 55 Spalten
+  - kombiniert aus: 9 Zillow-ZHVI-Tabellen (aktuelle Preise je Kategorie),
+    Wetter-Aggregate (NOAA / GHCN), Sturm-Events (NOAA Storm Events DB),
+    FEMA-Disaster-Declarations und BLS-Arbeitslosenquote
+  - bereits enthalten: die 9 "next_6m"-Spalten (Preis 6 Monate in die Zukunft)
+    sowie eine bereits berechnete %-Veränderung
+
+
+--------------------------------------------------------------------------------
+3. AUFBEREITUNG  →  Modeling_Table_absolute.csv
+--------------------------------------------------------------------------------
+Skript : 1 Table Adjustment / absolute_modeling_table_adjustment.py
+Output : 1 Table Adjustment / Modeling_Table_absolute.csv
+
+Transformationsschritte:
+
+(a) Filter auf YEAR_MONTH >= 2015-01.
+    Begründung: ältere Jahre dominieren die Tabelle (300k+ Zeilen
+    Vor-2015), tragen aber zur Vorhersage 2024/2025 wenig bei und blähen
+    die Datei nur auf.
+
+(b) WIDE → LONG  (Pivot/Melt).
+    Statt 9 Zielspalten pro Zeile (zhvi_*_next_6m) bauen wir 9 Zeilen pro
+    (CBSA, Monat), eine je Wohnkategorie. Damit gibt es nur noch
+        price_now        = aktueller Preis der jeweiligen Kategorie
+        price_next_6m    = Preis 6 Monate später (das Target)
+    sowie ein Spalten-Set "category", das anschliessend via One-Hot in
+    9 cat_*-Dummies aufgelöst wird.
+
+    Vorteile dieses Long-Format:
+      - ein einziges Modell lernt kategorienübergreifende Dynamik
+      - Zeilen mit fehlenden Kategorien (z.B. 5br_mid in kleinen Metros)
+        fallen einzeln raus, statt die ganze CBSA-Monat-Zeile zu killen
+      - Standard-Regression mit skalarem Target (kein MultiOutput)
+
+(c) NaN-Drop: Zeilen ohne price_now ODER price_next_6m fliegen raus
+    (sonst weder Training noch Auswertung möglich für diese Kategorie-Zeile).
+
+(d) Log-Transformation der Preise.
+    Zusätzlich zu price_now und price_next_6m schreiben wir
+        log_price_now      = np.log(price_now)
+        log_price_next_6m  = np.log(price_next_6m)
+    Die nicht-log-Spalten bleiben erhalten, weil wir am Schluss in Dollar
+    auswerten wollen. Mehr dazu in Abschnitt 6.
+
+Resultat:  874,461 Zeilen × 48 Spalten  (~144 MB CSV).
+
+
+--------------------------------------------------------------------------------
+4. ZWEI EXPERIMENTE
+--------------------------------------------------------------------------------
+Ordnerstruktur:
+    2 Modeling /
+        prices as feature / absolute_modeling_training_testing.py
+        no prices as feature / absolute_modeling_training_testing_no_prices.py
+    3 Results /
+        prices as feature / ...    (Ergebnisse Experiment 1)
+        no prices as feature / ... (Ergebnisse Experiment 2)
+        graphs / ...               (vergleichende Visualisierungen)
+
+Beide Skripte nutzen identische Daten, Modelle und CV-Logik, unterscheiden
+sich nur in der Feature-Auswahl:
+
+  Experiment 1  "prices as feature"
+    Features = log_price_now + 9 Kategorie-Dummies + Wetter + Wirtschaft +
+               Katastrophen-Features + Monat/Quartal/Jahr + CBSA-Identität
+    Idee     : Das volle Modell mit aktueller Preis-Anker-Variable. Setzt
+               quasi den realistischen Use-Case ab — was kann der Markt
+               mit allem verfügbaren Wissen prognostizieren?
+
+  Experiment 2  "no prices as feature"
+    Features = wie oben, ABER ohne price_now UND ohne log_price_now
+    Idee     : Stress-Test. Wie weit kommt das Modell allein mit
+               Katastrophen-/Wetter-/Wirtschafts-/Geografie-Information,
+               wenn der Preis-Anker fehlt? Das zeigt, wie viel Signal
+               die nicht-Preis-Features eigenständig tragen.
+
+Die CBSA-Identität wird in BEIDEN Experimenten als Feature mitgegeben
+(siehe Abschnitt 7), weil ohne sie das Modell gar nicht weiss, welche
+Metropolregion es gerade vorhersagt — und damit etwa Manhattan- und Aberdeen-
+Preise nicht unterscheiden könnte.
+
+
+--------------------------------------------------------------------------------
+5. CROSS-VALIDATION UND HYPERPARAMETER-TUNING
+--------------------------------------------------------------------------------
+TimeSeriesSplit (5 Folds)
+    Der Datensatz wird streng chronologisch geteilt: Fold 1 trainiert auf
+    den ältesten Daten, validiert auf den nächsten Monaten; Fold 2 fügt die
+    Fold-1-Validierung dem Training hinzu, validiert auf den darauffolgenden
+    Monaten usw. Damit kann ein Modell, das die Zukunft vorhersagen soll,
+    nie aus der Zukunft trainieren.
+
+RandomizedSearchCV (n_iter = 10)
+    Pro Modell werden 10 Hyperparameter-Kombinationen aus der definierten
+    Verteilung gezogen und an den 5 TimeSeriesSplit-Folds bewertet
+    → 50 Fits je Modell. Das ist der "randomCV"-Anteil: nicht die Daten
+    werden zufällig vermischt (TimeSeriesSplit hält die Zeitachse), sondern
+    die Hyperparameter-Kandidaten.
+
+Final-Test
+    Die letzten 12 Monate der Daten werden vor jeglicher CV als
+    Hold-out-Test zurückgehalten. Auf diesem Block erfolgt die finale
+    Bewertung der gewählten Modelle (Cut-off Datum siehe Summary-Report).
+
+
+--------------------------------------------------------------------------------
+6. WARUM LOG-TARGET?  (Hedonic Pricing Logic)
+--------------------------------------------------------------------------------
+Ein lineares Modell mit additiven Effekten ("Manhattan-Dummy + 5br-Dummy")
+kann Immobilienpreise nur SCHLECHT abbilden, weil reale Preise
+multiplikativ skalieren:
+    Preis(5br, Manhattan) ≈ Manhattan-Mittel × Kategorie-Multiplikator
+nicht
+    Manhattan-Mittel + Kategorie-Aufschlag
+
+Lösung: log-Transformation des Targets (und des Preis-Anchors).
+    log(Preis(5br, Manhattan)) ≈ log(Manhattan-Mittel) + log(Kategorie-Mult.)
+Im Log-Raum werden multiplikative Effekte zu additiven — genau das, was
+lineare Modelle elegant fitten können. Zusätzlich:
+
+  - Heteroskedastizität (Streuung wächst mit dem Preis) wird stabilisiert
+  - Die rechtsschiefe Preisverteilung wird annähernd symmetrisch
+  - Die Kategorie-x-CBSA-Interaktion verschwindet weitgehend ohne explizite
+    Interaktionsspalten
+
+Im Code: y_train = log_price_next_6m (Modell sieht log-USD). Für die
+Bewertung exp()-en wir die Predictions wieder zurück nach USD, sodass alle
+veröffentlichten Metriken (RMSE, MAE, R²), Vorhersage-CSVs und Grafiken in
+realen Dollar-Beträgen vorliegen.
+
+Hinweis im Comparison-CSV: die Spalte CV_RMSE_log ist absichtlich im
+log-Raum gehalten — das ist die Grösse, die RandomizedSearchCV intern
+optimiert hat. RMSE / MAE / R² sind in $ (nach Rücktransformation).
+
+
+--------------------------------------------------------------------------------
+7. CBSA ALS FEATURE
+--------------------------------------------------------------------------------
+Die ursprünglichen Modelle behandelten CBSA_CODE als ID-Spalte (also nicht
+als Feature). Das Resultat war drastisch: ohne Preis-Anker konnten die
+Modelle den Metropolregion-Effekt nicht lernen und kollabierten auf R² ~0.20.
+
+Lösung: CBSA als echtes Feature einbinden, ABER unterschiedlich kodiert
+je Modell-Familie:
+
+  Lineare Modelle (LinearRegression, Ridge)
+    OneHotEncoder mit sparse_output=True
+    → 855 Dummy-Spalten, aber dünn besetzt → ~15 MB RAM
+    → jede CBSA bekommt einen eigenen Fixed-Effect-Koeffizienten
+
+  Tree-Modelle (RandomForest, XGBoost, HistGradientBoosting)
+    OrdinalEncoder (0..854)
+    → eine einzige ganzzahlige Spalte
+    → Bäume splitten auf der ordinalen Achse; nicht ganz so elegant wie
+      native Kategorie-Splits, aber funktional ausreichend
+    Hinweis: HistGB unterstützt native Kategorie-Features nur bis 255
+    eindeutige Werte. Da wir 855 CBSAs haben, lassen wir HistGB die
+    ordinale Spalte wie eine normale numerische Feature binnen.
+
+Realisiert in einem sklearn ColumnTransformer pro Modell-Familie, der in
+der Pipeline der jeweiligen Modelle landet. Damit ist die gesamte
+Vorverarbeitung Teil der CV-Schleife (kein Daten-Leck zwischen Folds).
+
+
+--------------------------------------------------------------------------------
+8. VERGLICHENE ALGORITHMEN  (fünf Stück, identisch in beiden Experimenten)
+--------------------------------------------------------------------------------
+  1. linear_regression  — StandardScaler + OneHotEncoder + LinearRegression
+                          (keine Hyperparameter zu tunen)
+  2. ridge              — wie 1, aber Ridge-Regression (L2-Regularisierung),
+                          tuning: alpha
+  3. random_forest      — RandomForestRegressor; tuning: n_estimators,
+                          max_depth, min_samples_split/leaf, max_features
+  4. xgboost            — XGBRegressor (tree_method=hist); tuning: 8 Knöpfe
+                          inkl. learning_rate, subsample, reg_alpha/lambda
+  5. gradient_boosting  — HistGradientBoostingRegressor (sklearn's
+                          histogrambasiertes GB, multithreaded via OpenMP,
+                          ~10–30× schneller als der klassische GB);
+                          tuning: max_iter, max_depth, learning_rate,
+                          min_samples_leaf, max_leaf_nodes, l2_regularization
+
+
+--------------------------------------------------------------------------------
+9. WAS WIRD WO GESPEICHERT?
+--------------------------------------------------------------------------------
+3 Results / prices as feature /
+    absolute_00_Summary_Report.txt           — kompakte Zusammenfassung
+    absolute_01_Model_Comparison.csv         — RMSE / MAE / R² je Modell
+    absolute_02_Per_Category_Results.csv     — pro Wohnsegment aufgeschlüsselt
+    absolute_03_Best_Hyperparameters.csv     — beste Hyperparameter je Modell
+    absolute_04_Test_Predictions_Best.csv    — actual vs predicted (Hold-out)
+    absolute_feature_columns.txt             — Liste der verwendeten Features
+    absolute_{model}.pkl                     — gepickelte Best-Modelle (5 Stück)
+
+3 Results / no prices as feature /
+    gleiche Struktur, Dateinamen mit Prefix "absolute_no_prices_"
+
+3 Results / graphs /
+    01_model_comparison.png                  — RMSE/MAE/R² Balken (alle 5
+                                                Modelle × 2 Setups)
+    02_actual_vs_predicted.png               — Scatter für den jeweils besten
+                                                Modell-Sieger pro Setup
+    03_time_series.png                       — 4 Beispiel-Metros, sfr_mid:
+                                                actual + beide Predictions +
+                                                historischer Mittelwert
+    generate_results_graphs.py               — der Code für obige Plots
+
+
+--------------------------------------------------------------------------------
+10. ERKENNTNISSE  (Stand des aktuellen Laufs)
+--------------------------------------------------------------------------------
+  (a) `price_now` (als log-Feature) dominiert.
+      Mit Preis-Anker liegt R² aller Modelle nahe an 1.0 — das Modell muss
+      im Wesentlichen nur "wo der Preis heute liegt × kleine Wachstumsrate"
+      lernen. Das ist die realistische Vorhersagequalität bei voller
+      Information.
+
+  (b) Ohne `price_now` bleibt die CBSA-Identität entscheidend.
+      Ohne den Preis-Anker und ohne CBSA-Feature fiel R² der linearen
+      Modelle auf ~0.20 — sie wussten gar nicht, welche Metropolregion sie
+      vorhersagen. Mit CBSA-Feature, aber ohne Preis-Anker, springen lineare
+      Modelle auf ~0.72: die Fixed-Effect-Struktur "jede CBSA hat ein
+      eigenes Preis-Niveau" trägt den Grossteil des Signals.
+
+  (c) Lineare Modelle gewinnen in beiden Setups, wenn die Struktur passt.
+      Mit korrekt kodierter CBSA und log-Target erreichen LinearRegression
+      und Ridge das beste Test-RMSE. Tree-Modelle (besonders RandomForest)
+      kämpfen mit der Ordinal-Kodierung der CBSA — sie müssen die
+      Fixed-Effect-Struktur durch Splits diskret approximieren.
+
+  (d) Trees können nicht extrapolieren.
+      Das Hold-out reicht in 2025–2026; das Training endet 2024-08. Bäume
+      sind stückweise konstant und produzieren für 2025/26 dieselben
+      Vorhersagen wie für die letzten gesehenen Monate. Lineare Modelle
+      können zumindest entlang des `year`-Features linear extrapolieren —
+      auch wenn der globale Trend-Koeffizient die metropolregionsspezifische
+      Geschwindigkeit nicht erfasst.
+
+  (e) Ohne Preis-Anker tendieren ALLE Modelle zum CBSA-Historie-Mittel.
+      Sichtbar im Zeitreihen-Plot (03_time_series.png): die orange
+      Vorhersage-Linie liegt nahe am eingezeichneten "2015–2024 Mittelwert"
+      einer Metropolregion. Schnell appreciierende Metros wie NYC, LA und
+      Miami-FL werden unterschätzt; flachere Metros wie Chicago bleiben
+      treffend.
+
+
+--------------------------------------------------------------------------------
+11. LIMITATIONEN & POTENZIELLE NÄCHSTE SCHRITTE
+--------------------------------------------------------------------------------
+  - Metropolregionsspezifische Trends sind aktuell NICHT modelliert. Eine
+    `CBSA × year`-Interaktion (oder eine "rolling appreciation rate"-Spalte)
+    würde das orange Modell stark verbessern, ohne dass es `price_now`
+    benötigt.
+  - Das eigentliche Investment-Business-Case-Ziel wäre eine %-Veränderungs-
+    Vorhersage statt eines absoluten Preises. Mit log-Target sind wir
+    konzeptionell nahe dran — `delta_log_price = log_price_next_6m -
+    log_price_now` wäre ein direkter Wachstumsraten-Schätzer und exakt das,
+    was Investoren bewerten würden.
+  - Externe Daten, die im Proposal genannt, aber noch nicht eingebunden
+    sind: FEMA Floods, USFS Wildfires, NOAA Heat Days, USGS Earthquakes,
+    EPA AQI. Diese werden für die Streamlit-App noch relevant.
+
+
+--------------------------------------------------------------------------------
+12. REPRODUZIERBARKEIT
+--------------------------------------------------------------------------------
+Reihenfolge der Skripte:
+
+  1. python "Model Analysis/Prediction absolute price 6 months/1 Table Adjustment/absolute_modeling_table_adjustment.py"
+     → erzeugt Modeling_Table_absolute.csv  (Long-Format, mit log-Spalten)
+
+  2. python "Model Analysis/Prediction absolute price 6 months/2 Modeling/prices as feature/absolute_modeling_training_testing.py"
+     → Experiment 1, schreibt nach 3 Results/prices as feature/
+
+  3. python "Model Analysis/Prediction absolute price 6 months/2 Modeling/no prices as feature/absolute_modeling_training_testing_no_prices.py"
+     → Experiment 2, schreibt nach 3 Results/no prices as feature/
+
+  4. python "Model Analysis/Prediction absolute price 6 months/3 Results/graphs/generate_results_graphs.py"
+     → erzeugt die drei Vergleichsgrafiken aus den CSV-Outputs
+
+Random-State ist überall auf 42 gepinnt, daher sind die Trainings-Runs
+deterministisch (modulo Parallelisierung).
+
+
+================================================================================
+Ende der Prozess-Dokumentation.
+================================================================================

@@ -1,0 +1,6 @@
+Model,Params
+linear_regression,{}
+ridge,{'est__alpha': np.float64(0.008632008168602538)}
+random_forest,"{'est__max_depth': 14, 'est__max_features': 'sqrt', 'est__min_samples_leaf': 9, 'est__min_samples_split': 23, 'est__n_estimators': 234}"
+xgboost,"{'est__colsample_bytree': np.float64(0.6390688456025535), 'est__learning_rate': np.float64(0.1024932221692416), 'est__max_depth': 9, 'est__min_child_weight': 12, 'est__n_estimators': 658, 'est__reg_alpha': np.float64(2.1516897298083326), 'est__reg_lambda': np.float64(0.004936948694960458), 'est__subsample': np.float64(0.7564242430292963)}"
+gradient_boosting,"{'est__l2_regularization': np.float64(5.872283616443723), 'est__learning_rate': np.float64(0.06792740114629246), 'est__max_depth': 11, 'est__max_iter': 495, 'est__max_leaf_nodes': 67, 'est__min_samples_leaf': 149}"
