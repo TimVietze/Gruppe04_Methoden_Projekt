@@ -1,2 +1,7 @@
 CLAUDE.md
 ClassDocuments/
+
+# Derived modeling artifacts that exceed GitHub size limits (regenerate from scripts)
+Model Analysis/Prediction absolute price 6 months/1 Table Adjustment/Modeling_Table_absolute.csv
+Model Analysis/Prediction absolute price 6 months/3 Results/prices as feature/absolute_random_forest.pkl
+Model Analysis/Prediction absolute price 6 months/3 Results/no prices as feature/absolute_no_prices_random_forest.pkl
