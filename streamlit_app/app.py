@@ -15,9 +15,20 @@ import viz
 from text import CATEGORY_EN, METRIC_LABELS
 
 st.set_page_config(
-    page_title="ClimateHome — Investor View",
+    page_title="6-Month Housing Price & Climate Risk Forecast (U.S. Metros)",
     page_icon="🏠",
     layout="wide",
+)
+
+st.markdown(
+    """
+    <style>
+    [data-testid="stMetricValue"] { font-size: 1.25rem; line-height: 1.2; }
+    [data-testid="stMetricLabel"] { font-size: 0.8rem; }
+    [data-testid="stMetricDelta"] { font-size: 0.8rem; }
+    </style>
+    """,
+    unsafe_allow_html=True,
 )
 
 
@@ -41,7 +52,7 @@ def _geo():
     return data.load_geojson()
 
 
-st.title("🏠 ClimateHome — Investor View for U.S. Metros")
+st.title("6-Month Housing Price & Climate Risk Forecast (U.S. Metros)")
 st.caption(
     "Forecast horizon: **March – August 2026** (6 months ahead of the February 2026 baseline). "
     "Prices: Ridge model. Damage risk: business risk score from the 6-month damage model."
