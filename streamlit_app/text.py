@@ -34,19 +34,34 @@ METRIC_LABELS = {
 def verdict(combined_score: float, risk_band: str, price_change_pct: float) -> str:
     """Return a short English investor verdict.
 
-    Buckets (checked in order):
-    1. score ≥ 60 and risk low/moderate → strong buy
-    2. score ≥ 60 and risk high/very high → high-reward-high-risk
-    3. score ≤ −40 → avoid
-    4. abs(score) < 20 and risk high/very high → risky stagnation
-    5. fallback → neutral
+    Three score regimes — high (≥ 60), low (≤ −40), and tepid (|score| < 20) —
+    each branch differentiates by the specific risk band so Low vs Moderate
+    and High vs Very High get distinct wording.
     """
-    if combined_score >= 60 and risk_band not in HIGH_RISK_BANDS:
-        return "Strong return potential at moderate risk — attractive market."
-    if combined_score >= 60 and risk_band in HIGH_RISK_BANDS:
-        return "High return potential, but very high damage risk — review carefully."
+    if combined_score >= 60:
+        if risk_band == "Low":
+            return "Strong return potential at low risk — very attractive market."
+        if risk_band == "Moderate":
+            return "Strong return potential at moderate risk — attractive market."
+        if risk_band == "High":
+            return "High return potential, but elevated damage risk — review carefully."
+        if risk_band == "Very High":
+            return "High return potential, but very high damage risk — review very carefully."
+
     if combined_score <= -40:
-        return "Limited upside — better to avoid."
-    if abs(combined_score) < 20 and risk_band in HIGH_RISK_BANDS:
-        return "Low upside paired with elevated risk — unattractive."
+        if risk_band == "Very High":
+            return "Limited upside paired with very high damage risk — strongly avoid."
+        if risk_band == "High":
+            return "Limited upside paired with elevated risk — avoid."
+        if risk_band == "Moderate":
+            return "Limited upside at moderate risk — better to avoid."
+        if risk_band == "Low":
+            return "Limited upside, though risk is low — better to avoid."
+
+    if abs(combined_score) < 20:
+        if risk_band == "Very High":
+            return "Low upside paired with very high risk — clearly unattractive."
+        if risk_band == "High":
+            return "Low upside paired with elevated risk — unattractive."
+
     return "Average market — no clear recommendation."
