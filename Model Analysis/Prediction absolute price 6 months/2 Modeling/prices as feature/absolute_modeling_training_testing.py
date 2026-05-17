@@ -56,6 +56,8 @@ HERE = Path(__file__).resolve().parent                                   # .../2
 DATA_FILE = HERE.parent.parent / "1 Table Adjustment" / "Modeling_Table_absolute.csv"
 OUT_DIR = HERE.parent.parent / "3 Results" / "prices as feature"
 OUT_DIR.mkdir(parents=True, exist_ok=True)
+OUT_DIR_PREDS = OUT_DIR / "results prices"
+OUT_DIR_PREDS.mkdir(parents=True, exist_ok=True)
 
 # ----------------------------------------------------------------------------
 # Columns
@@ -255,6 +257,11 @@ def run() -> None:
     tscv = TimeSeriesSplit(n_splits=CV_FOLDS)
     space = model_space(numeric_cols)
 
+    # Pre-compute category label per test row so each per-model prediction CSV
+    # can join it back without recomputing.
+    cat_labels = np.array([c.replace("cat_", "") for c in CAT_COLS])
+    test_categories = cat_labels[test[CAT_COLS].to_numpy().argmax(axis=1)]
+
     comparison_rows: list[dict] = []
     per_cat_rows: list[dict] = []
     best_params: dict[str, dict] = {}
@@ -302,6 +309,17 @@ def run() -> None:
         out_path = OUT_DIR / f"absolute_{name}.pkl"
         joblib.dump(best, out_path)
         print(f"  Saved → {out_path.name}")
+
+        preds_df = test[["CBSA_CODE", "CBSA_TITLE", "YEAR_MONTH"]].copy().reset_index(drop=True)
+        preds_df["category"] = test_categories
+        preds_df["price_now"] = test["price_now"].to_numpy()
+        preds_df["actual_price_next_6m"] = y_test_abs
+        preds_df["predicted_price_next_6m"] = y_pred_abs
+        preds_df["actual_log_price_next_6m"] = test[TARGET].to_numpy()
+        preds_df["predicted_log_price_next_6m"] = y_pred_log
+        preds_path = OUT_DIR_PREDS / f"absolute_predictions_{name}.csv"
+        preds_df.to_csv(preds_path, index=False)
+        print(f"  Saved → {preds_path.relative_to(OUT_DIR)}")
 
     # ----- write comparison artifacts -----
     comp_df = pd.DataFrame(comparison_rows).sort_values("RMSE").reset_index(drop=True)

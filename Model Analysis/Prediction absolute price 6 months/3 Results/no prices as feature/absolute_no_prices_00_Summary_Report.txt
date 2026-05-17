@@ -1,5 +1,5 @@
 ABSOLUTE PRICE 6M — TRAIN / TEST (log target, CBSA, NO price_now)
-Generated: 2026-05-17 17:56:37
+Generated: 2026-05-17 18:47:42
 
 Data:     Modeling_Table_absolute.csv  (874,461 clean long-format rows)
 Target:   log_price_next_6m   (predictions exp()-converted back to $ for metrics)
