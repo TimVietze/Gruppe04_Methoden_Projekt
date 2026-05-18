@@ -1,5 +1,5 @@
 ================================================================================
-FS26 Methoden Project — ClimateHome
+6-Month Housing Price & Climate Risk Forecast (U.S. Metros)
 Mini-Capstone "Data Science & AI for Business", University of St. Gallen
 ================================================================================
 
@@ -7,7 +7,8 @@ Goal
 ----
 Help investors spot attractive vs. risky U.S. metro housing markets by
 combining a 6-month price forecast with a 6-month climate-damage risk
-forecast. End product: a Streamlit dashboard ("ClimateHome — Investor View").
+forecast. End product: a Streamlit dashboard
+("6-Month Housing Price & Climate Risk Forecast (U.S. Metros)").
 
 Pipeline overview
 -----------------
@@ -187,7 +188,6 @@ Run locally
                                     absolute price, damage risk)
     streamlit_app/                  dashboard (app + data + viz + text + tests)
     ClimateHome_Proposal.pdf        the original project proposal
-    docs/                           internal notes (Claude superpowers)
     ClassDocuments/                 (gitignored) lecture materials
 
 
