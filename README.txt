@@ -3,6 +3,9 @@
 Mini-Capstone "Data Science & AI for Business", University of St. Gallen
 ================================================================================
 
+##DISCLAIMER: We have used AI for code creation, assistance and introducing comments 
+and documentation into the code
+
 Goal
 ----
 Help investors spot attractive vs. risky U.S. metro housing markets by
